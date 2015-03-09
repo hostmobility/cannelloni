@@ -28,9 +28,10 @@ namespace cannelloni {
 
 /* Design Notes:
  *
- * This buffer contains can_frames received by CANThread or
+ * This buffer contains canfd_frames received by CANThread or
  * UDPThread and stores them in a queue until an event occurs that leads to
  * flushing the buffer (e.g. timeout in UDPThread).
+ *
  * When this happens, the buffers will be swapped to minimize the
  * time a Thread can be locked by a mutex.
  * All sorting should take place on the intermediate buffer to make
@@ -39,6 +40,10 @@ namespace cannelloni {
  * Only the intermediate buffer is exposed and should only be accessed
  * by one party at a time.
  *
+ * If the producer is a lot faster than the receiver, in our case
+ * UDPThread >> CANThread, frames can also be extracted one at a time
+ * if the interface blocks and writing is deferred.
+ *
  * Currently there are a lot of mutex locks involved which need to be checked
  * again at a later time.
  *
@@ -46,39 +51,49 @@ namespace cannelloni {
  * use-cases of cannelloni.
  */
 
-#define FRAME_POOL_SIZE 1000
-
 class FrameBuffer {
   public:
-    FrameBuffer(std::size_t size=FRAME_POOL_SIZE);
+    FrameBuffer(size_t size, size_t max);
     /* Locks m_poolMutex and takes a free frame from m_framePool,
      * will grow the buffer if no frame is available
      * will return NULL if no memory is available
      */
     ~FrameBuffer();
-    can_frame* requestFrame();
+    canfd_frame* requestFrame();
 
     /* If a read fails we need to give the frame back */
-    void insertFramePool(can_frame *frame);
+    void insertFramePool(canfd_frame *frame);
 
-    /* Inserts a frame into the frameBuffer */
-    void insertFrame(can_frame *frame);
+    /* Inserts a frame into the frameBuffer (back) */
+    void insertFrame(canfd_frame *frame);
+
+    /* Inserts a frame into the frameBuffer (front) */
+    void returnFrame(canfd_frame *frame);
+
+    /* Instead of operating on the intermediateBuffer, we can
+     * also request a frame from the buffer and put it back
+     * using insertFramePool or returnFrame
+     * This is useful when the consumer is a lot slower than
+     * the producer (see Design Notes)
+     */
+    canfd_frame* requestBufferFront();
 
     /* Swaps m_Buffer with m_intermediateBuffer */
     void swapBuffers();
 
-    /* Sorts m_intermediateBuffer by can_frame->id */
+    /* Sorts m_intermediateBuffer by canfd_frame->id */
     void sortIntermediateBuffer();
 
     /* merges m_intermediateBuffer back into m_poolMutex */
     void mergeIntermediateBuffer();
+
 
     /* This will return a pointer to the current intermediateBuffer.
      * Once the operation is done the caller MUST call
      * unlockIntermediateBuffer to unlock the mutex in order to
      * prevent a deadlock!
      */
-    const std::list<can_frame*>* getIntermediateBuffer();
+    const std::list<canfd_frame*>* getIntermediateBuffer();
 
     void unlockIntermediateBuffer();
 
@@ -92,9 +107,9 @@ class FrameBuffer {
     bool resizePool(std::size_t size);
 
   private:
-    std::list<can_frame*> m_framePool;
-    std::list<can_frame*> *m_buffer;
-    std::list<can_frame*> *m_intermediateBuffer;
+    std::list<canfd_frame*> m_framePool;
+    std::list<canfd_frame*> *m_buffer;
+    std::list<canfd_frame*> *m_intermediateBuffer;
 
     uint64_t m_totalAllocCount;
     /* When filling/swapping the buffers we currently need a mutex */
@@ -104,6 +119,15 @@ class FrameBuffer {
     /* Track current frame buffer size */
     size_t m_bufferSize;
     size_t m_intermediateBufferSize;
+    /*
+     * This is the maximum of frames that will be
+     * allocated. This guarantees that cannelloni stays
+     * within a fixed memory bounds.
+     *
+     * a size of zero means that the buffer can grow
+     * unlimited
+     */
+    size_t m_maxAllocCount;
 };
 
 }

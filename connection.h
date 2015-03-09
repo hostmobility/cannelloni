@@ -37,7 +37,7 @@ namespace cannelloni {
 
 #define RECEIVE_BUFFER_SIZE 1500
 #define UDP_PAYLOAD_SIZE 1472
-#define CAN_TIMEOUT 2000 /* ms */
+#define CAN_TIMEOUT 2000000 /* 2 sec in us */
 
 struct debugOptions_t {
   uint8_t can    : 1;
@@ -51,7 +51,10 @@ class Thread {
     Thread();
     ~Thread();
     virtual int start();
+    /* this is function tell the thread to stop */
     virtual void stop();
+    /* joins the thread */
+    void join();
     /* */
     bool isRunning();
     /* */
@@ -74,7 +77,8 @@ class UDPThread : public Thread {
   public:
     UDPThread(const struct debugOptions_t &debugOptions,
               const struct sockaddr_in &remoteAddr,
-              const struct sockaddr_in &localAddr);
+              const struct sockaddr_in &localAddr,
+              bool sort);
 
     virtual int start();
     virtual void stop();
@@ -86,7 +90,7 @@ class UDPThread : public Thread {
     void setFrameBuffer(FrameBuffer *buffer);
     FrameBuffer *getFrameBuffer();
 
-    void sendCANFrame(can_frame *frame);
+    void sendCANFrame(canfd_frame *frame);
     void setTimeout(uint32_t timeout);
     uint32_t getTimeout();
 
@@ -103,6 +107,7 @@ class UDPThread : public Thread {
 
   private:
     struct debugOptions_t m_debugOptions;
+    bool m_sort;
     int m_udpSocket;
     /*
      * We use the timerfd API of the Linux Kernel to send
@@ -139,13 +144,18 @@ class CANThread : public Thread {
     void setFrameBuffer(FrameBuffer *buffer);
     FrameBuffer *getFrameBuffer();
 
-    void transmitCANFrame(can_frame *frame);
+    void transmitCANFrame(canfd_frame *frame);
   private:
     void transmitBuffer();
     void fireTimer();
+    /* Returns the current timer value in us */
+    uint32_t getTimerValue();
+    void adjustTimer(uint32_t interval, uint32_t value);
+
   private:
     struct debugOptions_t m_debugOptions;
     int m_canSocket;
+    bool m_canfd;
     /*
      * We use the timerfd API of the Linux Kernel to send
      * m_frameBuffer periodically
