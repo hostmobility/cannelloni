@@ -56,10 +56,13 @@ class FrameBuffer {
     FrameBuffer(size_t size, size_t max);
     /* Locks m_poolMutex and takes a free frame from m_framePool,
      * will grow the buffer if no frame is available
-     * will return NULL if no memory is available
+     *
+     * will return NULL if no memory is available and overwriteLast is false
+     * will return the last frame in the buffer when overwriteLast is true
+     *
      */
     ~FrameBuffer();
-    canfd_frame* requestFrame();
+    canfd_frame* requestFrame(bool overwriteLast, bool debug = false);
 
     /* If a read fails we need to give the frame back */
     void insertFramePool(canfd_frame *frame);
@@ -78,6 +81,8 @@ class FrameBuffer {
      */
     canfd_frame* requestBufferFront();
 
+    canfd_frame* requestBufferBack();
+
     /* Swaps m_Buffer with m_intermediateBuffer */
     void swapBuffers();
 
@@ -87,24 +92,29 @@ class FrameBuffer {
     /* merges m_intermediateBuffer back into m_poolMutex */
     void mergeIntermediateBuffer();
 
+    /* merges parts of m_intermediateBuffer back into m_buffer */
+    void returnIntermediateBuffer(std::list<canfd_frame*>::iterator start);
 
     /* This will return a pointer to the current intermediateBuffer.
      * Once the operation is done the caller MUST call
      * unlockIntermediateBuffer to unlock the mutex in order to
      * prevent a deadlock!
      */
-    const std::list<canfd_frame*>* getIntermediateBuffer();
+    std::list<canfd_frame*>* getIntermediateBuffer();
 
     void unlockIntermediateBuffer();
 
     void debug();
+
+    /* Moves all frames back into m_framePool and sets the size to 0 */
+    void reset();
 
     void clearPool();
 
     size_t getFrameBufferSize();
 
   private:
-    bool resizePool(std::size_t size);
+    bool resizePool(std::size_t size, bool debug = false);
 
   private:
     std::list<canfd_frame*> m_framePool;
